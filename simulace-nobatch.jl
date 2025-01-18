@@ -1,9 +1,10 @@
 
+# using Random
+# using Statistics
+# using Logging
+#
 using Distributions
-using Random
-using Statistics
 using StatsBase  # Import for Weights function
-using Logging
 using LoggingExtras
 
 # Setup logger to save logs to a file
@@ -12,13 +13,13 @@ Logging.global_logger(file_logger)
 
 # Simulation parameters
 
-const NUM_AGENTS = 10  # Number of agents participating in the simulation
+const NUM_AGENTS = 3  # Number of agents participating in the simulation
 const WEEKS = 200  # Number of weeks to simulate
 # const BATCH_UPLOAD_SIZES = [0, 10, 20, 30, 50, 100]  # Different initial batch upload sizes to test
 const BATCH_UPLOAD_SIZES = [0]
-const INITIAL_QUALITY_DIST = LogNormal(3, 2)  # Distribution for the initial quality of records
-const QUALITY_IMPROVEMENT_PROB = 0.1  # Probability of improving the quality of a record
-const RECORD_CREATION_PROB = 0.3  # Probability of creating a new record when not searching
+const initialQualityDist = LogNormal(3, 2)  # Distribution for the initial quality of records
+const qualityImprovementProb = 0.7  # Probability of improving the quality of a record
+const recordCreationProb = 0.3  # Probability of creating a new record when not searching
 
 # Originaly I intended to have categories explicitly named for closer resemblance with reality
 # but I failed to find a real contribution for the simulation, because real live categories are much more complex
@@ -28,16 +29,18 @@ const RECORD_CREATION_PROB = 0.3  # Probability of creating a new record when no
 # const TYPES = ["running", "creative", "thinking", "discussion", "history"]  # Types of activities
 # const PLACES = ["room", "forest", "city", "playground"]  # Possible places for activities
 # const CATEGORIES = [(t, p) for t in TYPES for p in PLACES]  # Generate all combinations of types and places
-const categories = [1:20;] # Create representation of categories  # well ...
+const categories = [1:12;] # Create representation of categories  # well ...
 
 # Structs for records and agents
 mutable struct Record
-    category::Int64  # Category of the record (type, place)
+    id::Int
+    # category::Int64  # Category of the record (type, place)
     quality::Float64  # Quality of the record
 end
 
 mutable struct Agent
-    past_success_rate::Float64  # Success rate based on past database interactions
+    past_success_rate::Float64  # Success rate based on past database interaction
+    used::Dict{Int,Vector{Int}}
 end
 
 # Initialize database, agents, and records
@@ -46,8 +49,11 @@ for category in categories
     db[category] = Vector{Record}()  # Initialize an empty vector for each category
 end
 
-agents = [Agent(0.4) for _ in 1:NUM_AGENTS]  # Initialize agents with a default success rate of 0.5
+agents = [Agent(0.4, Dict()) for _ in 1:NUM_AGENTS]  # Initialize agents with a default success rate of 0.5
 @info "Agents created: $agents"
+
+
+
 
 # Helper functions
 function search_database(agent::Agent, category::Int64, db::Dict)
@@ -71,10 +77,27 @@ function search_database(agent::Agent, category::Int64, db::Dict)
     end
 end
 
-function create_record(category::Int64)
-    quality = rand(INITIAL_QUALITY_DIST)  # Generate initial quality from the distribution
-    @info "Creating new record in category: $category with initial quality: $quality"
-    return Record(category, quality)  # Return a new record
+recordscreated = 0
+function create_record()
+    quality = rand(initialQualityDist)  # Generate initial quality from the distribution
+    global recordscreated += 1
+    @info "Creating new record with initial quality: $quality and id: $recordscreated"
+    return Record(recordscreated, quality)  # Return a new record
+end
+
+function chanceToImproveRecord!(record::Record)
+    if rand() < qualityImprovementProb
+        @info "Agent improves the quality of the record."
+        record.quality += rand(1.0:0.1:2.0)  # Improve record quality by a random amount
+    end
+end
+function chanceToCreateRecord!(category::Int)
+    if rand() < recordCreationProb
+        @info "Agent creates a new record instead."
+        push!(db[category], create_record())  # Create a new record instead of searching
+        @info "Creating new record in category: $category"
+    end
+
 end
 
 function run_simulation(batch_upload_size)
@@ -82,7 +105,7 @@ function run_simulation(batch_upload_size)
     # Initialize database with batch upload
     for _ in 1:batch_upload_size
         category = categories[rand(1:length(categories))]  # Randomly select a category
-        record = create_record(category)
+        record = create_record()
         push!(db[category], record)  # Add the record to the database
     end
 
@@ -104,21 +127,40 @@ function run_simulation(batch_upload_size)
                 attempts += 1
 
                 if success
-                    successes += 1
-                    if rand() < QUALITY_IMPROVEMENT_PROB
-                        @info "Agent improves the quality of the record."
-                        record.quality += rand(1.0:0.1:2.0)  # Improve record quality by a random amount
+                    try
+                        m = isempty(agent.used[record.id])
+                        @debug "is empty $m"
+                    catch
+                        agent.used[record.id] = Vector{Int}()
+                        @debug "record not used yet"
                     end
+
+                    recordUsage = agent.used[record.id]
+                    if !isempty(recordUsage) && week - last(recordUsage) > 54
+                        durationFromLastUse = week - last(recordUsage)
+                        successes += 1
+
+                        push!(recordUsage, week)
+                        chanceToImproveRecord!(record)
+                        @info "Agent used found record: $record in week: $week"
+                        @debug "Week from last use: $durationFromLastUse"
+                    elseif !isempty(recordUsage) && week - last(recordUsage) < 54
+                        @info "Record used too recently. Its on cooldown. :)"
+                        chanceToCreateRecord!(category)
+                    else
+                        successes += 1
+                        push!(recordUsage, week)
+                        chanceToImproveRecord!(record)
+                        @info "Agent used found record: $record in week: $week"
+                    end
+
                 else
-                    @warn "Search failed. Creating a new record."
-                    push!(db[category], create_record(category))  # Create a new record if search fails
+                    chanceToCreateRecord!(category)
+                    @info "Search failed. Chance for creating a new record."
                 end
             else
+                chanceToCreateRecord!(category)
                 @info "Agent decides not to search the database."
-                if rand() < RECORD_CREATION_PROB
-                    @info "Agent creates a new record instead."
-                    push!(db[category], create_record(category))  # Create a new record instead of searching
-                end
             end
         end
 
