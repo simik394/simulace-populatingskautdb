@@ -1,0 +1,11 @@
+version: "3.9"  # Or "3.8", depending on your Docker Engine
+
+services:
+  julia-dev:
+    image: julia:1.11.2-alpine
+    # build:
+      # context: . # Current directory (where your Dockerfile is)
+      # dockerfile: Dockerfile # Name of your Dockerfile (if different, specify it)
+    # container_name: julia-nvim-dev # Give your container a descriptive name
+    volumes:
+      - ..:/workspace

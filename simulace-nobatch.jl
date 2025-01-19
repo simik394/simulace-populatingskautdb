@@ -10,7 +10,7 @@ Logging.global_logger(file_logger)
 
 const NUM_AGENTS = 3  # Number of agents participating in the simulation
 # const BATCH_UPLOAD_SIZES = [0, 10, 20, 30, 50, 100]  # Different initial batch upload sizes to test
-const BATCH_UPLOAD_SIZES = [0, 10]
+const BATCH_UPLOAD_SIZES = [0, 10, 30, 50]
 const initialQualityDist = LogNormal(3, 2)  # Distribution for the initial quality of records
 const qualityImprovementProb = 0.7  # Probability of improving the quality of a record
 const recordCreationProb = 0.3  # Probability of creating a new record when not searching
@@ -36,7 +36,7 @@ mutable struct Record
 end
 
 mutable struct Agent
-    past_success_rate::Float64  # Success rate based on past database interaction
+    probabilityToSearch::Float64  # Success rate based on past database interaction
     used::Dict{Int,Vector{Int}}
 end
 
@@ -100,7 +100,7 @@ function agentDecides(agent::Agent, week::Int, attempts, successes)
     @info "Agent selects category: $category"
 
     # Decide whether to search or create a record
-    if rand() < agent.past_success_rate
+    if rand() < agent.probabilityToSearch
 
         @info "Agent decides to search the database."
         success, sRecords = search_database(agent, category, db)
@@ -263,7 +263,7 @@ function printStatistics(v)
 end
 runs = []
 recordsamounts = []
-for i in 1:15
+for i in 1:1
     runres, nRecords = runSimForBSizes()
     push!(runs, runres)
     push!(recordsamounts, nRecords)
